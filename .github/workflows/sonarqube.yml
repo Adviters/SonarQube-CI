@@ -1,0 +1,122 @@
+name: Reusable - SonarQube Scan
+
+on:
+  workflow_call:
+    inputs:
+      sonar_sources:
+        type: string
+        required: false
+        default: "src"
+      sonar_exclusions:
+        type: string
+        required: false
+        default: "**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/coverage/**"
+      use_branch_key:
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  sonar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Wait for SonarQube
+        run: |
+          for i in {1..60}; do
+            if curl -sSf "${{ secrets.SONAR_HOST_URL }}/api/system/status" | grep -q '"status":"UP"'; then
+              echo "SonarQube is UP"
+              exit 0
+            fi
+            echo "Waiting SonarQube..."
+            sleep 5
+          done
+          echo "SonarQube not ready"
+          exit 1
+
+      - name: Compute Sonar project params
+        shell: bash
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          REPO_NAME="$(basename "$GITHUB_REPOSITORY")"
+
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            BRANCH="${GITHUB_HEAD_REF}"
+          else
+            BRANCH="${GITHUB_REF_NAME}"
+          fi
+
+          BRANCH_SAFE="$(echo "$BRANCH" | tr ' /' '__' | tr -cd '[:alnum:]_-.')"
+
+          KEY="${OWNER}_${REPO_NAME}"
+          NAME="${GITHUB_REPOSITORY}"
+
+          if [ "${{ inputs.use_branch_key }}" = "true" ]; then
+            KEY="${KEY}_${BRANCH_SAFE}"
+            NAME="${NAME} (${BRANCH})"
+          fi
+
+          echo "SONAR_PROJECT_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "SONAR_PROJECT_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "SONAR_BRANCH=$BRANCH" >> "$GITHUB_ENV"
+
+          echo "Computed projectKey: $KEY"
+          echo "Computed projectName: $NAME"
+
+      - name: Sonar Scan
+        uses: SonarSource/sonarqube-scan-action@v3
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.projectName=${{ env.SONAR_PROJECT_NAME }}
+            -Dsonar.sources=${{ inputs.sonar_sources }}
+            -Dsonar.exclusions=${{ inputs.sonar_exclusions }}
+
+      - name: Quality Gate
+        id: qualitygate
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        timeout-minutes: 5
+
+      - name: Comment PR with Sonar result
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
+        with:
+          script: |
+            const gate = "${{ steps.qualitygate.outputs.quality-gate-status }}";
+            const host = process.env.SONAR_HOST_URL.replace(/\/$/, '');
+            const projectKey = process.env.SONAR_PROJECT_KEY;
+
+            const url = `${host}/dashboard?id=${encodeURIComponent(projectKey)}`;
+            const pr = context.payload.pull_request;
+
+            const body = [
+              "### SonarQube report",
+              `**Quality Gate:** \`${gate}\``,
+              "",
+              `🔎 Dashboard: ${url}`
+            ].join("\n");
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body
+            });
