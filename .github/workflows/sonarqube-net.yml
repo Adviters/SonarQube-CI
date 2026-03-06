@@ -1,0 +1,107 @@
+name: Reusable - SonarQube Scan .NET
+
+on:
+  workflow_call:
+    inputs:
+      dotnet_version:
+        type: string
+        required: false
+        default: "8.0.x"
+      solution_or_project:
+        type: string
+        required: false
+        default: "."
+      use_branch_key:
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      SONAR_HOST_URL:
+        required: true
+      SONAR_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  sonar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Install SonarScanner for .NET
+        run: dotnet tool install --global dotnet-sonarscanner
+
+      - name: Wait for SonarQube
+        run: |
+          for i in {1..60}; do
+            if curl -sSf "${{ secrets.SONAR_HOST_URL }}/api/system/status" | grep -q '"status":"UP"'; then
+              echo "SonarQube is UP"
+              exit 0
+            fi
+            echo "Waiting SonarQube..."
+            sleep 5
+          done
+          echo "SonarQube not ready"
+          exit 1
+
+      - name: Compute Sonar project params
+        shell: bash
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          REPO_NAME="$(basename "$GITHUB_REPOSITORY")"
+
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            BRANCH="${GITHUB_HEAD_REF}"
+          else
+            BRANCH="${GITHUB_REF_NAME}"
+          fi
+
+          BRANCH_SAFE="$(echo "$BRANCH" | tr ' /' '__' | tr -cd '[:alnum:]_.-')"
+
+          KEY="${OWNER}_${REPO_NAME}"
+          NAME="${GITHUB_REPOSITORY}"
+
+          if [ "${{ inputs.use_branch_key }}" = "true" ]; then
+            KEY="${KEY}_${BRANCH_SAFE}"
+            NAME="${NAME} (${BRANCH})"
+          fi
+
+          echo "SONAR_PROJECT_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "SONAR_PROJECT_NAME=$NAME" >> "$GITHUB_ENV"
+
+      - name: Sonar Begin
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet-sonarscanner begin \
+            /k:"${{ env.SONAR_PROJECT_KEY }}" \
+            /n:"${{ env.SONAR_PROJECT_NAME }}" \
+            /d:sonar.host.url="${{ secrets.SONAR_HOST_URL }}" \
+            /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
+
+      - name: Restore
+        run: dotnet restore ${{ inputs.solution_or_project }}
+
+      - name: Build
+        run: dotnet build ${{ inputs.solution_or_project }} --no-restore
+
+      - name: Test
+        run: dotnet test ${{ inputs.solution_or_project }} --no-build
+        continue-on-error: true
+
+      - name: Sonar End
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet-sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
