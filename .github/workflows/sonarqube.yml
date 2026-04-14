@@ -36,6 +36,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Verify Java
+        run: |
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
+
       - name: Wait for SonarQube
         run: |
           for i in {1..60}; do
@@ -61,7 +72,6 @@ jobs:
             BRANCH="${GITHUB_REF_NAME}"
           fi
 
-          # sanitize: replace spaces/slashes, then keep only safe chars
           BRANCH_SAFE="$(echo "$BRANCH" | tr ' /' '__' | tr -cd '[:alnum:]_.-')"
 
           KEY="${OWNER}_${REPO_NAME}"
@@ -85,12 +95,15 @@ jobs:
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_SCANNER_SKIP_JRE_PROVISIONING: "true"
         with:
           args: >
+            -Dsonar.scanner.skipJreProvisioning=true
             -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
             -Dsonar.projectName=${{ env.SONAR_PROJECT_NAME }}
             -Dsonar.sources=${{ inputs.sonar_sources }}
             -Dsonar.exclusions=${{ inputs.sonar_exclusions }}
+            -Dsonar.verbose=true
 
       - name: Debug scanner output
         if: always()
@@ -103,7 +116,6 @@ jobs:
           echo "---- report-task.txt ----"
           test -f .scannerwork/report-task.txt && cat .scannerwork/report-task.txt || echo "report-task.txt not found"
 
-      # Falla con mensaje claro si no existe el report del scanner
       - name: Ensure report-task exists
         shell: bash
         run: |
