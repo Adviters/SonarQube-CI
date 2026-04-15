@@ -14,15 +14,15 @@ on:
       sonar_sources:
         type: string
         required: false
-        default: "src"
+        default: "src/main"
       sonar_tests:
         type: string
         required: false
-        default: "src/test"
+        default: ""
       sonar_binaries:
         type: string
         required: false
-        default: "build/classes"
+        default: "build/classes/java/main"
       sonar_exclusions:
         type: string
         required: false
@@ -117,28 +117,34 @@ jobs:
         shell: bash
         run: |
           echo "---- build/classes ----"
-          find build/classes -maxdepth 5 -type d 2>/dev/null || true
+          find build/classes -maxdepth 6 -type d 2>/dev/null || true
           echo "---- build/libs ----"
           ls -la build/libs 2>/dev/null || true
 
       - name: Sonar Scan
-        uses: SonarSource/sonarqube-scan-action@v3
+        shell: bash
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_SCANNER_SKIP_JRE_PROVISIONING: "true"
-        with:
-          args: >
-            -Dsonar.scanner.skipJreProvisioning=true
-            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
-            -Dsonar.projectName=${{ env.SONAR_PROJECT_NAME }}
-            -Dsonar.sources=${{ inputs.sonar_sources }}
-            -Dsonar.tests=${{ inputs.sonar_tests }}
-            -Dsonar.java.binaries=${{ inputs.sonar_binaries }}
-            -Dsonar.exclusions=${{ inputs.sonar_exclusions }}
-            -Dsonar.qualitygate.wait=true
-            -Dsonar.qualitygate.timeout=300
-            -Dsonar.verbose=true
+        run: |
+          ARGS=(
+            "-Dsonar.scanner.skipJreProvisioning=true"
+            "-Dsonar.projectKey=${SONAR_PROJECT_KEY}"
+            "-Dsonar.projectName=${SONAR_PROJECT_NAME}"
+            "-Dsonar.sources=${{ inputs.sonar_sources }}"
+            "-Dsonar.java.binaries=${{ inputs.sonar_binaries }}"
+            "-Dsonar.exclusions=${{ inputs.sonar_exclusions }}"
+            "-Dsonar.qualitygate.wait=true"
+            "-Dsonar.qualitygate.timeout=300"
+            "-Dsonar.verbose=true"
+          )
+
+          if [ -n "${{ inputs.sonar_tests }}" ]; then
+            ARGS+=("-Dsonar.tests=${{ inputs.sonar_tests }}")
+          fi
+
+          sonar-scanner "${ARGS[@]}"
 
       - name: Debug scanner output
         if: always()
