@@ -1,0 +1,191 @@
+name: Reusable - SonarQube Scan Python
+
+on:
+  workflow_call:
+    inputs:
+      python_version:
+        type: string
+        required: false
+        default: "3.12"
+
+      sonar_sources:
+        type: string
+        required: false
+        default: "."
+
+      sonar_exclusions:
+        type: string
+        required: false
+        default: "**/__pycache__/**,**/.venv/**,**/venv/**,**/.pytest_cache/**,**/htmlcov/**,**/dist/**,**/build/**,**/migrations/**"
+
+      requirements_file:
+        type: string
+        required: false
+        default: "requirements.txt"
+
+      use_branch_key:
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      SONAR_HOST_URL:
+        required: true
+      SONAR_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  sonar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Verify Python
+        run: |
+          python --version
+          pip --version
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+
+          if [ -f "${{ inputs.requirements_file }}" ]; then
+            pip install -r "${{ inputs.requirements_file }}"
+          fi
+
+          pip install pytest pytest-cov coverage
+
+      - name: Run tests and generate coverage
+        shell: bash
+        run: |
+          pytest \
+            --cov=. \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term || true
+
+      - name: Wait for SonarQube
+        shell: bash
+        run: |
+          for i in {1..60}; do
+            if curl -sSf "${{ secrets.SONAR_HOST_URL }}/api/system/status" | grep -q '"status":"UP"'; then
+              echo "SonarQube is UP"
+              exit 0
+            fi
+
+            echo "Waiting SonarQube..."
+            sleep 5
+          done
+
+          echo "SonarQube not ready"
+          exit 1
+
+      - name: Compute Sonar project params
+        shell: bash
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          REPO_NAME="$(basename "$GITHUB_REPOSITORY")"
+
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            BRANCH="${GITHUB_HEAD_REF}"
+          else
+            BRANCH="${GITHUB_REF_NAME}"
+          fi
+
+          BRANCH_SAFE="$(echo "$BRANCH" | tr ' /' '__' | tr -cd '[:alnum:]_.-')"
+
+          KEY="${OWNER}_${REPO_NAME}"
+          NAME="${GITHUB_REPOSITORY}"
+
+          if [ "${{ inputs.use_branch_key }}" = "true" ]; then
+            KEY="${KEY}_${BRANCH_SAFE}"
+            NAME="${NAME} (${BRANCH})"
+          fi
+
+          echo "SONAR_PROJECT_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "SONAR_PROJECT_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "SONAR_BRANCH=$BRANCH" >> "$GITHUB_ENV"
+
+      - name: Sonar Scan
+        uses: SonarSource/sonarqube-scan-action@v3
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_SCANNER_SKIP_JRE_PROVISIONING: "true"
+        with:
+          args: >
+            -Dsonar.scanner.skipJreProvisioning=true
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.projectName=${{ env.SONAR_PROJECT_NAME }}
+            -Dsonar.sources=${{ inputs.sonar_sources }}
+            -Dsonar.exclusions=${{ inputs.sonar_exclusions }}
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
+            -Dsonar.verbose=true
+
+      - name: Debug scanner output
+        if: always()
+        shell: bash
+        run: |
+          echo "PWD=$(pwd)"
+          ls -la
+
+          echo "---- coverage.xml ----"
+          cat coverage.xml || true
+
+          echo "---- .scannerwork ----"
+          ls -la .scannerwork || true
+
+          echo "---- report-task.txt ----"
+          test -f .scannerwork/report-task.txt && cat .scannerwork/report-task.txt || echo "report-task.txt not found"
+
+      - name: Comment PR with Sonar result
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const host = process.env.SONAR_HOST_URL.replace(/\/$/, '');
+            const projectKey = process.env.SONAR_PROJECT_KEY;
+            const status = process.env.JOB_STATUS;
+
+            const url = `${host}/dashboard?id=${encodeURIComponent(projectKey)}`;
+            const pr = context.payload.pull_request;
+
+            const body = [
+              "### SonarQube report",
+              `**Workflow status:** \`${status}\``,
+              "",
+              `🔎 Dashboard: ${url}`
+            ].join("\n");
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body
+            });
