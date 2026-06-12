@@ -13,10 +13,25 @@ on:
         required: false
         default: "."
 
+      sonar_tests:
+        type: string
+        required: false
+        default: ""
+
+      sonar_test_inclusions:
+        type: string
+        required: false
+        default: "**/test_*.py,**/*_test.py"
+
       sonar_exclusions:
         type: string
         required: false
         default: "**/__pycache__/**,**/.venv/**,**/venv/**,**/.pytest_cache/**,**/htmlcov/**,**/dist/**,**/build/**,**/migrations/**"
+
+      sonar_coverage_exclusions:
+        type: string
+        required: false
+        default: "**/sonar_tests/**,**/tests/**,**/test_*.py,**/*_test.py"
 
       requirements_file:
         type: string
@@ -79,7 +94,7 @@ jobs:
       - name: Run tests and generate coverage
         shell: bash
         run: |
-          pytest \
+          python -m pytest \
             --cov=. \
             --cov-report=xml:coverage.xml \
             --cov-report=term || true
@@ -138,8 +153,12 @@ jobs:
             -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
             -Dsonar.projectName=${{ env.SONAR_PROJECT_NAME }}
             -Dsonar.sources=${{ inputs.sonar_sources }}
+            -Dsonar.tests=${{ inputs.sonar_tests }}
+            -Dsonar.test.inclusions=${{ inputs.sonar_test_inclusions }}
             -Dsonar.exclusions=${{ inputs.sonar_exclusions }}
+            -Dsonar.coverage.exclusions=${{ inputs.sonar_coverage_exclusions }}
             -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.python.version=${{ inputs.python_version }}
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
             -Dsonar.verbose=true
