@@ -134,7 +134,7 @@ jobs:
 
           if [ "${{ inputs.use_branch_key }}" = "true" ]; then
             KEY="${KEY}_${BRANCH_SAFE}"
-            NAME="${NAME} (${BRANCH})"
+            NAME="${NAME}_${BRANCH_SAFE}"
           fi
 
           echo "SONAR_PROJECT_KEY=$KEY" >> "$GITHUB_ENV"
