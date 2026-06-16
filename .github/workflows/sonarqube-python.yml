@@ -96,9 +96,8 @@ jobs:
         run: |
           python -m pytest \
             --cov=. \
+            --cov-report=xml:coverage.xml \
             --cov-report=term || true
-
-          python -m coverage xml -o coverage.xml --relative-source
 
       - name: Wait for SonarQube
         shell: bash
