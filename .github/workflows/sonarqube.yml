@@ -17,7 +17,7 @@ on:
         description: "Archivos excluidos del análisis"
         type: string
         required: false
-        default: "**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/coverage/**"
+        default: "**/*.spec.ts,**/*.spec.tsx,**/*.spec.js,**/*.spec.jsx,**/*.test.ts,**/*.test.tsx,**/*.test.js,**/*.test.jsx,**/test/**,**/tests/**,**/*.module.ts,**/main.ts,**/index.ts,**/*.dto.ts,**/*.entity.ts,**/*.interface.ts,**/*.types.ts,**/*.enum.ts"
 
       use_branch_key:
         description: "Agregar branch al project key"
