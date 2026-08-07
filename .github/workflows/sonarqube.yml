@@ -3,101 +3,393 @@ name: Reusable - SonarQube Scan
 on:
   workflow_call:
     inputs:
+
+      # =====================================================
+      # SONAR
+      # =====================================================
       sonar_sources:
+        description: "Sources a analizar por SonarQube"
         type: string
         required: false
         default: "."
+
       sonar_exclusions:
+        description: "Archivos excluidos del análisis"
         type: string
         required: false
         default: "**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/coverage/**"
+
       use_branch_key:
+        description: "Agregar branch al project key"
         type: boolean
         required: false
         default: false
+
+
+      # =====================================================
+      # TESTS / COVERAGE
+      #
+      # false por defecto para no modificar el comportamiento
+      # de los repositorios que ya usan este workflow.
+      # =====================================================
+      run_tests:
+        description: "Ejecutar tests con coverage antes de SonarQube"
+        type: boolean
+        required: false
+        default: false
+
+      node_version:
+        description: "Versión de Node utilizada para ejecutar los tests"
+        type: string
+        required: false
+        default: "20"
+
+      install_command:
+        description: "Comando utilizado para instalar dependencias"
+        type: string
+        required: false
+        default: "npm i"
+
+      test_command:
+        description: "Comando utilizado para ejecutar tests y generar coverage"
+        type: string
+        required: false
+        default: "npm run test -- --coverage"
+
+      coverage_report_path:
+        description: "Ruta al reporte LCOV generado por Jest"
+        type: string
+        required: false
+        default: "coverage/lcov.info"
+
+      sonar_coverage_exclusions:
+        description: "Archivos excluidos del cálculo de coverage"
+        type: string
+        required: false
+        default: "**/*.spec.ts,**/*.spec.tsx,**/*.spec.js,**/*.spec.jsx,**/*.test.ts,**/*.test.tsx,**/*.test.js,**/*.test.jsx,**/test/**,**/tests/**"
+
+
     secrets:
       SONAR_HOST_URL:
         required: true
+
       SONAR_TOKEN:
         required: true
+
 
 permissions:
   contents: read
   pull-requests: write
   issues: write
 
+
 jobs:
   sonar:
     runs-on: ubuntu-latest
 
+    env:
+      SONAR_COVERAGE_ARG: ""
+      SONAR_COVERAGE_EXCLUSIONS_ARG: ""
+
     steps:
+
+      # =====================================================
+      # CHECKOUT
+      # =====================================================
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+
+      # =====================================================
+      # NODE
+      #
+      # Solo se ejecuta cuando run_tests = true
+      # =====================================================
+      - name: Set up Node.js
+        if: inputs.run_tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+
+
+      - name: Verify Node
+        if: inputs.run_tests
+        shell: bash
+        run: |
+          echo "Node version:"
+          node --version
+
+          echo ""
+          echo "NPM version:"
+          npm --version
+
+
+      # =====================================================
+      # INSTALL DEPENDENCIES
+      #
+      # Default:
+      # npm i
+      # =====================================================
+      - name: Install dependencies
+        if: inputs.run_tests
+        shell: bash
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "Installing dependencies"
+          echo "========================================"
+
+          echo "Command:"
+          echo "${{ inputs.install_command }}"
+
+          echo ""
+
+          ${{ inputs.install_command }}
+
+
+      # =====================================================
+      # RUN TESTS + COVERAGE
+      #
+      # Default:
+      #
+      # npm run test -- --coverage
+      #
+      # Para Jest normalmente equivale a:
+      #
+      # jest --coverage
+      #
+      # Si los tests fallan, falla el workflow.
+      # =====================================================
+      - name: Run tests with coverage
+        if: inputs.run_tests
+        shell: bash
+        env:
+          CI: "true"
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "Running tests with coverage"
+          echo "========================================"
+
+          echo "Command:"
+          echo "${{ inputs.test_command }}"
+
+          echo ""
+
+          ${{ inputs.test_command }}
+
+
+      # =====================================================
+      # VERIFY COVERAGE
+      #
+      # Cuando run_tests=true esperamos obligatoriamente:
+      #
+      # coverage/lcov.info
+      #
+      # Si no existe, falla el pipeline porque Sonar
+      # no podría recibir coverage.
+      # =====================================================
+      - name: Verify coverage report
+        if: inputs.run_tests
+        shell: bash
+        run: |
+          set -e
+
+          COVERAGE_FILE="${{ inputs.coverage_report_path }}"
+
+          echo "========================================"
+          echo "Verifying coverage"
+          echo "========================================"
+
+          echo "Expected coverage report:"
+          echo "$COVERAGE_FILE"
+
+          echo ""
+
+          if [ ! -f "$COVERAGE_FILE" ]; then
+
+            echo "ERROR: Coverage report was not generated."
+            echo ""
+
+            echo "Expected:"
+            echo "$COVERAGE_FILE"
+
+            echo ""
+            echo "Files found inside coverage/:"
+
+            find coverage \
+              -maxdepth 4 \
+              -type f \
+              2>/dev/null || true
+
+            exit 1
+
+          fi
+
+          echo "Coverage report found:"
+          ls -lh "$COVERAGE_FILE"
+
+
+      # =====================================================
+      # CONFIGURE SONAR COVERAGE
+      #
+      # Solo agrega parámetros de coverage cuando
+      # run_tests=true.
+      # =====================================================
+      - name: Configure Sonar coverage
+        if: inputs.run_tests
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "Configuring Sonar coverage"
+          echo "========================================"
+
+          echo "SONAR_COVERAGE_ARG=-Dsonar.javascript.lcov.reportPaths=${{ inputs.coverage_report_path }}" \
+            >> "$GITHUB_ENV"
+
+          echo "SONAR_COVERAGE_EXCLUSIONS_ARG=-Dsonar.coverage.exclusions=${{ inputs.sonar_coverage_exclusions }}" \
+            >> "$GITHUB_ENV"
+
+          echo ""
+          echo "Coverage enabled:"
+          echo "${{ inputs.coverage_report_path }}"
+
+
+      # =====================================================
+      # JAVA
+      # =====================================================
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
+
       - name: Verify Java
         shell: bash
         run: |
           java -version
+
+          echo ""
           echo "JAVA_HOME=$JAVA_HOME"
 
+
+      # =====================================================
+      # WAIT FOR SONARQUBE
+      # =====================================================
       - name: Wait for SonarQube
         shell: bash
         run: |
+          echo "Checking SonarQube availability..."
+
           for i in {1..60}; do
-            if curl -sSf "${{ secrets.SONAR_HOST_URL }}/api/system/status" | grep -q '"status":"UP"'; then
+
+            if curl -sSf \
+              "${{ secrets.SONAR_HOST_URL }}/api/system/status" \
+              | grep -q '"status":"UP"'; then
+
+              echo ""
               echo "SonarQube is UP"
+
               exit 0
+
             fi
-            echo "Waiting SonarQube..."
+
+            echo "Waiting for SonarQube..."
+
             sleep 5
+
           done
+
+          echo ""
           echo "SonarQube not ready"
+
           exit 1
 
+
+      # =====================================================
+      # COMPUTE SONAR PROJECT PARAMS
+      # =====================================================
       - name: Compute Sonar project params
         shell: bash
         run: |
           OWNER="${GITHUB_REPOSITORY_OWNER}"
+
           REPO_NAME="$(basename "$GITHUB_REPOSITORY")"
 
+
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+
             BRANCH="${GITHUB_HEAD_REF}"
+
           else
+
             BRANCH="${GITHUB_REF_NAME}"
+
           fi
 
-          BRANCH_SAFE="$(echo "$BRANCH" | tr ' /' '__' | tr -cd '[:alnum:]_.-')"
+
+          BRANCH_SAFE="$(
+            echo "$BRANCH" \
+              | tr ' /' '__' \
+              | tr -cd '[:alnum:]_.-'
+          )"
+
 
           KEY="${OWNER}_${REPO_NAME}"
+
           NAME="${GITHUB_REPOSITORY}"
 
+
           if [ "${{ inputs.use_branch_key }}" = "true" ]; then
+
             KEY="${KEY}_${BRANCH_SAFE}"
+
             NAME="${NAME} (${BRANCH})"
+
           fi
 
-          echo "SONAR_PROJECT_KEY=$KEY" >> "$GITHUB_ENV"
-          echo "SONAR_PROJECT_NAME=$NAME" >> "$GITHUB_ENV"
-          echo "SONAR_BRANCH=$BRANCH" >> "$GITHUB_ENV"
 
-          echo "Computed projectKey: $KEY"
-          echo "Computed projectName: $NAME"
-          echo "Computed branch: $BRANCH"
+          echo "SONAR_PROJECT_KEY=$KEY" \
+            >> "$GITHUB_ENV"
 
+          echo "SONAR_PROJECT_NAME=$NAME" \
+            >> "$GITHUB_ENV"
+
+          echo "SONAR_BRANCH=$BRANCH" \
+            >> "$GITHUB_ENV"
+
+
+          echo ""
+          echo "========================================"
+          echo "Sonar configuration"
+          echo "========================================"
+
+          echo "Project Key:  $KEY"
+          echo "Project Name: $NAME"
+          echo "Branch:       $BRANCH"
+
+
+      # =====================================================
+      # SONAR SCAN
+      #
+      # Mantengo @v3 para no mezclar este cambio
+      # con una actualización de Sonar Action.
+      # =====================================================
       - name: Sonar Scan
         uses: SonarSource/sonarqube-scan-action@v3
+
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
           SONAR_SCANNER_SKIP_JRE_PROVISIONING: "true"
+
         with:
           args: >
             -Dsonar.scanner.skipJreProvisioning=true
@@ -105,47 +397,156 @@ jobs:
             -Dsonar.projectName=${{ env.SONAR_PROJECT_NAME }}
             -Dsonar.sources=${{ inputs.sonar_sources }}
             -Dsonar.exclusions=${{ inputs.sonar_exclusions }}
+            ${{ env.SONAR_COVERAGE_ARG }}
+            ${{ env.SONAR_COVERAGE_EXCLUSIONS_ARG }}
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
             -Dsonar.verbose=true
 
+
+      # =====================================================
+      # DEBUG
+      # =====================================================
       - name: Debug scanner output
         if: always()
         shell: bash
         run: |
           echo "PWD=$(pwd)"
-          ls -la
-          echo "---- .scannerwork ----"
-          ls -la .scannerwork || true
-          echo "---- report-task.txt ----"
-          test -f .scannerwork/report-task.txt && cat .scannerwork/report-task.txt || echo "report-task.txt not found"
 
+
+          echo ""
+          echo "========================================"
+          echo "Repository"
+          echo "========================================"
+
+          ls -la
+
+
+          if [ "${{ inputs.run_tests }}" = "true" ]; then
+
+            echo ""
+            echo "========================================"
+            echo "Test configuration"
+            echo "========================================"
+
+            echo "Node:"
+            echo "${{ inputs.node_version }}"
+
+            echo ""
+
+            echo "Install command:"
+            echo "${{ inputs.install_command }}"
+
+            echo ""
+
+            echo "Test command:"
+            echo "${{ inputs.test_command }}"
+
+
+            echo ""
+            echo "========================================"
+            echo "Coverage"
+            echo "========================================"
+
+            echo "Expected:"
+            echo "${{ inputs.coverage_report_path }}"
+
+            echo ""
+
+            if [ -d "coverage" ]; then
+
+              find coverage \
+                -maxdepth 4 \
+                -type f \
+                2>/dev/null || true
+
+            else
+
+              echo "coverage directory not found"
+
+            fi
+
+          fi
+
+
+          echo ""
+          echo "========================================"
+          echo ".scannerwork"
+          echo "========================================"
+
+          ls -la .scannerwork || true
+
+
+          echo ""
+          echo "========================================"
+          echo "report-task.txt"
+          echo "========================================"
+
+          if [ -f ".scannerwork/report-task.txt" ]; then
+
+            cat .scannerwork/report-task.txt
+
+          else
+
+            echo "report-task.txt not found"
+
+          fi
+
+
+      # =====================================================
+      # COMMENT PR
+      # =====================================================
       - name: Comment PR with Sonar result
         if: github.event_name == 'pull_request' && always()
+
         uses: actions/github-script@v7
+
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
           SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
+
           JOB_STATUS: ${{ job.status }}
+
         with:
           script: |
-            const host = process.env.SONAR_HOST_URL.replace(/\/$/, '');
-            const projectKey = process.env.SONAR_PROJECT_KEY;
-            const status = process.env.JOB_STATUS;
+            const host =
+              process.env.SONAR_HOST_URL.replace(/\/$/, '');
 
-            const url = `${host}/dashboard?id=${encodeURIComponent(projectKey)}`;
-            const pr = context.payload.pull_request;
+            const projectKey =
+              process.env.SONAR_PROJECT_KEY;
+
+            const status =
+              process.env.JOB_STATUS;
+
+            const url =
+              `${host}/dashboard?id=${encodeURIComponent(projectKey)}`;
+
+            const pr =
+              context.payload.pull_request;
+
 
             const body = [
+
               "### SonarQube report",
+
               `**Workflow status:** \`${status}\``,
+
               "",
+
               `🔎 Dashboard: ${url}`
+
             ].join("\n");
 
+
             await github.rest.issues.createComment({
+
               owner: context.repo.owner,
+
               repo: context.repo.repo,
+
               issue_number: pr.number,
+
               body
+
             });
