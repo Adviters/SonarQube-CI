@@ -85,7 +85,7 @@ permissions:
 
 jobs:
   sonar:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     env:
       SONAR_COVERAGE_ARG: ""
