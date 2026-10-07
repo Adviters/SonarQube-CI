@@ -48,7 +48,7 @@ permissions:
  
 jobs:
   sonar:
-    runs-on: self-hosted
+    runs-on: [self-hosted, php8.2]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
