@@ -402,6 +402,8 @@ jobs:
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
             -Dsonar.verbose=true
+            -Dsonar.scanner.socketTimeout=300
+            -Dsonar.scanner.responseTimeout=300
 
 
       # =====================================================
