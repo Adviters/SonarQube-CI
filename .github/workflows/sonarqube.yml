@@ -400,10 +400,10 @@ jobs:
             ${{ env.SONAR_COVERAGE_ARG }}
             ${{ env.SONAR_COVERAGE_EXCLUSIONS_ARG }}
             -Dsonar.qualitygate.wait=true
-            -Dsonar.qualitygate.timeout=300
+            -Dsonar.qualitygate.timeout=500
             -Dsonar.verbose=true
-            -Dsonar.scanner.socketTimeout=300
-            -Dsonar.scanner.responseTimeout=300
+            -Dsonar.scanner.socketTimeout=500
+            -Dsonar.scanner.responseTimeout=500
 
 
       # =====================================================
