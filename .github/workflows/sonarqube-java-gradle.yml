@@ -136,8 +136,10 @@ jobs:
             -Dsonar.java.binaries=${{ inputs.sonar_binaries }}
             -Dsonar.exclusions=${{ inputs.sonar_exclusions }}
             -Dsonar.qualitygate.wait=true
-            -Dsonar.qualitygate.timeout=300
+            -Dsonar.qualitygate.timeout=500
             -Dsonar.verbose=true
+            -Dsonar.scanner.socketTimeout=500
+            -Dsonar.scanner.responseTimeout=500
 
       - name: Debug scanner output
         if: always()
@@ -179,3 +181,9 @@ jobs:
               issue_number: pr.number,
               body
             });
+
+      - name: Cleanup SonarScanner
+        if: always()
+        shell: bash
+        run: |
+          sudo rm -rf "$GITHUB_WORKSPACE/.scannerwork"

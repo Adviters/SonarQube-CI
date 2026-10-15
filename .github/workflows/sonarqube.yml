@@ -552,3 +552,9 @@ jobs:
               body
 
             });
+
+      - name: Cleanup SonarScanner
+        if: always()
+        shell: bash
+        run: |
+          sudo rm -rf "$GITHUB_WORKSPACE/.scannerwork"
