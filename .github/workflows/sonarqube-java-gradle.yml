@@ -127,6 +127,7 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_SCANNER_SKIP_JRE_PROVISIONING: "true"
+          SONAR_SCANNER_JAVA_OPTS: "-Djava.net.preferIPv4Stack=true"
         with:
           args: >
             -Dsonar.scanner.skipJreProvisioning=true
