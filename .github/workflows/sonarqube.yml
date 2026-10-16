@@ -557,4 +557,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          sudo rm -rf "$GITHUB_WORKSPACE/.scannerwork"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src" \
+            alpine:3.20 \
+            rm -rf /src/.scannerwork
